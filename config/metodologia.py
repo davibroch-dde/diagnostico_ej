@@ -1,0 +1,588 @@
+"""Metodologia do diagnóstico.
+
+Cadeia lógica do sistema:
+
+    PERGUNTA -> INDICADOR -> DIMENSÃO -> MATURIDADE -> GARGALO -> PRIORIDADE -> RECOMENDAÇÃO
+
+Como a pontuação funciona
+-------------------------
+1. Cada pergunta gera uma nota de 0 a 100.
+   - Perguntas de escolha única: a nota é a pontuação da alternativa escolhida.
+   - Perguntas de múltipla escolha: soma das pontuações das práticas marcadas (limite 100).
+2. Cada pergunta alimenta um ou mais INDICADORES com uma contribuição (0 a 1).
+   Nota do indicador = média ponderada das notas das perguntas que o alimentam,
+   ponderada por (peso da pergunta x contribuição).
+3. Cada pergunta pertence a uma DIMENSÃO e a uma SUBDIMENSÃO.
+   Nota da dimensão/subdimensão = média ponderada das notas das perguntas (peso da pergunta).
+4. O ÍNDICE GERAL é a média ponderada das dimensões (pesos em config/settings.py:
+   Processos 30%, Mercado 30%, Aprendizagem 20%, Tecnologia 20%) menos um
+   AJUSTE DE ELO MAIS FRACO (teoria das restrições): quando a dimensão mais frágil
+   está abaixo de 40, desconta-se 25% da distância até 40 (máximo de 10 pontos).
+   Racional: uma EJ não é mais madura do que seu gargalo permite.
+5. Indicadores TRANSVERSAIS (escalabilidade, resiliência, conversão de conhecimento
+   em valor, prontidão para IA e profissionalização) cruzam perguntas de várias dimensões.
+
+Justificativa dos pesos
+-----------------------
+- Processos (30%): base de execução e entrega; sem ela, qualquer crescimento degrada qualidade.
+- Mercado e Comercial (30%): sustenta receita, aprendizagem aplicada e a própria razão de existir da EJ.
+- Aprendizagem (20%) e Tecnologia (20%): multiplicadores de capacidade, relevantes mas
+  dependentes de processos e mercado para gerar valor.
+"""
+from __future__ import annotations
+
+PESO_ELO_MAIS_FRACO = {"limite": 40.0, "fator": 0.25, "maximo": 10.0}
+
+# Indicadores primários de cada dimensão (exibidos nos painéis por dimensão)
+INDICADORES_POR_DIMENSAO = {
+    "processos": ["padronizacao", "org_operacional", "dep_pessoas", "gestao_projetos", "saude_operacional"],
+    "aprendizagem": ["desenv_tecnico", "soft_skills", "aplicabilidade", "gestao_conhecimento", "prep_mercado"],
+    "mercado": ["atrat_mercado", "comercial", "pot_ticket", "posicionamento", "networking", "pot_crescimento"],
+    "automacao": ["digitalizacao", "automacao", "integracao", "cultura_dados", "cap_tecnologica"],
+}
+INDICADORES_TRANSVERSAIS = ["escalabilidade", "resiliencia", "conv_valor", "prontidao_ia", "profissionalizacao"]
+
+
+def _i(nome, dim, desc, forca, fragilidade, risco, oportunidade,
+       problema, causa, acao, resultado, indicador, responsavel,
+       dificuldade, horizonte, impacto, urgencia):
+    return {
+        "nome": nome, "dim": dim, "desc": desc,
+        "forca": forca, "fragilidade": fragilidade, "risco": risco, "oportunidade": oportunidade,
+        "problema": problema, "causa": causa, "acao": acao, "resultado": resultado,
+        "indicador": indicador, "responsavel": responsavel, "dificuldade": dificuldade,
+        "horizonte": horizonte, "impacto": impacto, "urgencia": urgencia,
+    }
+
+
+INDICADORES = {
+    # ------------------------------------------------------------ PROCESSOS
+    "padronizacao": _i(
+        "Índice de Padronização", "processos",
+        "Grau em que os processos são definidos, documentados, seguidos e melhorados.",
+        "Processos documentados e seguidos reduzem a variação de qualidade e aceleram a entrada de novos membros.",
+        "Processos pouco padronizados: a qualidade das entregas varia conforme quem executa.",
+        "Qualidade irregular, retrabalho e dificuldade para escalar ou treinar novos membros.",
+        "Padronizar os cinco processos críticos libera tempo da diretoria e cria a base para automação e IA.",
+        "Os processos centrais dependem de como cada membro executa.",
+        "Conhecimento tácito, ausência de um responsável por processo e rotina que impede a documentação.",
+        "Mapear e documentar os 5 processos mais críticos (prospecção, proposta, kick-off, execução e encerramento de projetos) em checklists de uma página, com responsável, entradas, saídas e prazo-padrão, revisando-os ao fim de cada projeto.",
+        "Menor variação de qualidade entre projetos, onboarding mais rápido e base pronta para automação.",
+        "% de processos críticos documentados e aderência medida em auditoria amostral (meta: 5 processos e 80% de aderência em 90 dias).",
+        "Diretoria de Projetos / Presidência", "Média", 60, 92, 80),
+    "org_operacional": _i(
+        "Índice de Organização Operacional", "processos",
+        "Clareza de papéis, comunicação, gestão de demandas e cumprimento de prazos.",
+        "Papéis claros e acompanhamento regular de tarefas dão previsibilidade à rotina.",
+        "Papéis difusos e acompanhamento irregular de tarefas geram cobrança constante e prazos perdidos.",
+        "Decisões travadas, sobreposição de funções e desgaste entre membros.",
+        "Um ritual semanal e um quadro único de tarefas aumentam a execução sem aumentar a carga.",
+        "Prazos internos e responsabilidades não são acompanhados de forma consolidada.",
+        "Ferramentas e rotinas fragmentadas entre áreas e falta de rituais de gestão.",
+        "Centralizar o acompanhamento de tarefas e projetos em um único quadro, definindo responsável, prazo, status e próxima ação para cada entrega, e instituir uma reunião semanal de 30 minutos para revisá-lo. O objetivo é reduzir a dependência de comunicação informal e permitir que a diretoria identifique atrasos antes que afetem o cliente.",
+        "Atrasos identificados antes de impactar o cliente e menos cobrança informal.",
+        "% de tarefas concluídas no prazo (meta: acima de 85%) e entregas atrasadas sem aviso prévio (meta: zero).",
+        "Diretoria de Projetos", "Baixa", 30, 85, 85),
+    "dep_pessoas": _i(
+        "Índice de Dependência de Pessoas", "processos",
+        "Mede a independência da operação em relação a indivíduos específicos (nota alta = baixa dependência).",
+        "O conhecimento crítico está distribuído: a saída de pessoas específicas não paralisa a operação.",
+        "Poucas pessoas concentram conhecimento e decisões críticas.",
+        "A saída ou o afastamento de uma pessoa-chave pode paralisar processos e comprometer projetos em andamento.",
+        "Formar suplentes e criar duplas de responsabilidade reduz o risco e acelera o desenvolvimento dos membros.",
+        "Atividades críticas são dominadas por uma ou duas pessoas.",
+        "Falta de rodízio, de documentação e de formação de suplentes.",
+        "Para cada atividade crítica, designar um titular e um suplente e realizar um ciclo de job shadowing de 2 semanas, registrando o aprendizado no repositório. Começar pelas atividades dominadas por uma única pessoa.",
+        "Operação preservada na ausência de qualquer pessoa-chave.",
+        "% de atividades críticas com titular e suplente treinado (meta: 100% em 90 dias).",
+        "Presidência e Diretoria de Pessoas", "Média", 60, 88, 70),
+    "gestao_projetos": _i(
+        "Índice de Gestão de Projetos", "processos",
+        "Cronograma, acompanhamento, controle de escopo, pós-projeto e satisfação do cliente.",
+        "Gestão de projetos estruturada, com controle de prazo e escopo e aprendizado pós-entrega.",
+        "Práticas de gestão de projetos aplicadas de forma irregular.",
+        "Estouro de prazo e escopo, desgaste com clientes e perda de margem.",
+        "Padronizar o ciclo do projeto aumenta a satisfação do cliente e gera cases e indicações.",
+        "Projetos são conduzidos sem um ciclo padrão de planejamento, controle de escopo e encerramento.",
+        "Falta de um modelo único de projeto e de responsáveis pela governança.",
+        "Adotar um ciclo padrão com kick-off, cronograma com marcos, registro de mudanças de escopo, status quinzenal e encerramento com pesquisa de satisfação e lições aprendidas, a partir do próximo projeto.",
+        "Maior previsibilidade, escopo controlado e aumento da satisfação do cliente.",
+        "% de projetos entregues no prazo e no escopo e satisfação média do cliente (meta: pesquisa aplicada em 100% dos projetos).",
+        "Diretoria de Projetos", "Média", 30, 90, 78),
+    "saude_operacional": _i(
+        "Índice de Saúde Operacional", "processos",
+        "Capacidade de executar sem sobrecarga, atrasos crônicos e retrabalho, e de absorver novos projetos.",
+        "Operação saudável, com entregas previsíveis e capacidade de absorção.",
+        "Sinais de sobrecarga, atrasos ou retrabalho comprometem a estabilidade da operação.",
+        "Esgotamento de membros, queda de qualidade e perda de clientes por atrasos recorrentes.",
+        "Medir a capacidade da equipe permite aceitar mais projetos com segurança.",
+        "A operação funciona em modo reativo, com atrasos e retrabalho recorrentes.",
+        "Planejamento de capacidade inexistente e falhas de qualidade detectadas só na entrega.",
+        "Criar um mapa de capacidade por membro e projeto (horas disponíveis x horas demandadas), consultado antes de aceitar qualquer novo projeto, e inserir um ponto de revisão de qualidade antes de cada entrega ao cliente.",
+        "Menos atrasos e retrabalho e decisão de aceitar projetos baseada em capacidade real.",
+        "Taxa de retrabalho e % de membros acima da capacidade planejada (meta: retrabalho em queda a cada ciclo e nenhum membro com sobrecarga recorrente).",
+        "Diretoria de Projetos e Pessoas", "Média", 60, 88, 75),
+    # --------------------------------------------------------- APRENDIZAGEM
+    "desenv_tecnico": _i(
+        "Índice de Desenvolvimento Técnico", "aprendizagem",
+        "Domínio técnico dos membros e capacidade de resolver problemas.",
+        "Base técnica sólida e distribuída, que sustenta entregas com qualidade.",
+        "Domínio técnico concentrado em poucos membros ou insuficiente para entregas autônomas.",
+        "Entregas abaixo do padrão de mercado e dependência de poucos membros experientes.",
+        "Trilhas técnicas conectadas aos serviços vendidos aceleram a evolução e sustentam ticket maior.",
+        "O domínio técnico é desigual entre os membros.",
+        "Capacitações genéricas, desconectadas dos serviços vendidos e com pouca prática supervisionada.",
+        "Definir as 3 competências técnicas críticas dos serviços mais vendidos e estruturar trilhas de 4 semanas com prática supervisionada em projeto real e avaliação final por um mentor.",
+        "Membros entregando com autonomia e qualidade consistente.",
+        "% de membros certificados internamente nas competências críticas (meta: 70% em 90 dias).",
+        "Diretoria de Projetos / Pessoas", "Média", 90, 78, 55),
+    "soft_skills": _i(
+        "Índice de Soft Skills", "aprendizagem",
+        "Desenvolvimento intencional de comunicação, liderança, negociação, trabalho em equipe e gestão do tempo.",
+        "Competências comportamentais desenvolvidas com prática e feedback.",
+        "Soft skills desenvolvidas apenas de forma espontânea.",
+        "Dificuldade no relacionamento com clientes, conflitos internos e comunicação de baixa qualidade.",
+        "Competências comportamentais são grande diferencial de empregabilidade e de percepção de valor pelo cliente.",
+        "Competências comportamentais não são treinadas nem avaliadas de forma intencional.",
+        "Foco no conteúdo técnico e ausência de situações estruturadas de prática e feedback.",
+        "Incluir em cada projeto uma atividade de prática comportamental com feedback (por exemplo, apresentação de resultados ao cliente, com ensaio e feedback estruturado) e uma avaliação semestral das 5 competências-chave por membro.",
+        "Evolução comportamental observável e clientes mais satisfeitos com a comunicação.",
+        "Pontuação média das competências-chave na avaliação semestral e % de membros que apresentaram a clientes.",
+        "Diretoria de Pessoas", "Baixa", 60, 70, 50),
+    "aplicabilidade": _i(
+        "Índice de Aplicabilidade", "aprendizagem",
+        "Capacidade de aplicar o aprendizado em projetos reais, com contato com clientes, autonomia e feedback.",
+        "Os membros aprendem fazendo, em contato com clientes e problemas reais.",
+        "O aprendizado fica no campo teórico, com pouca exposição a problemas reais.",
+        "Membros bem informados, porém pouco preparados para a prática profissional.",
+        "Ampliar a exposição a projetos reais multiplica o valor percebido da EJ pelos membros.",
+        "Poucos membros têm contato com clientes e problemas reais.",
+        "Projetos concentrados em poucos membros e ausência de participação progressiva.",
+        "Estruturar participação progressiva (observador, executor assistido, executor autônomo, líder) para que todo membro atue em ao menos um projeto real por semestre, com reunião de contexto com o cliente.",
+        "Mais membros preparados para o mercado e projetos com mais capacidade de execução.",
+        "% de membros com participação em projeto real por semestre (meta: 80%).",
+        "Diretoria de Projetos", "Média", 60, 82, 60),
+    "gestao_conhecimento": _i(
+        "Índice de Gestão do Conhecimento", "aprendizagem",
+        "Documentação, onboarding, trilhas, repositório e continuidade entre gestões.",
+        "O conhecimento é registrado e transferido, preservando a memória da EJ entre gestões.",
+        "Conhecimento disperso e pouco registrado.",
+        "A cada troca de gestão a EJ perde aprendizados e repete erros.",
+        "Um repositório vivo e um onboarding estruturado reduzem o tempo de adaptação e protegem o legado.",
+        "O conhecimento produzido fica com as pessoas e se perde na troca de gestão.",
+        "Ausência de rotina de registro e de transição formal entre gestões.",
+        "Criar um repositório único (estrutura padrão de pastas por área e projeto), exigir registro mínimo de cada projeto no encerramento (escopo, solução, lições e modelos) e instituir uma transição de 3 semanas com checklist entre gestões.",
+        "Conhecimento preservado e novos membros produtivos mais rápido.",
+        "% de projetos com documentação mínima no repositório (meta: 100%) e tempo até a primeira entrega autônoma de novos membros.",
+        "Presidência e Diretoria de Pessoas", "Média", 30, 90, 82),
+    "prep_mercado": _i(
+        "Índice de Preparação para o Mercado", "aprendizagem",
+        "Quanto a vivência na EJ prepara os membros para as exigências do mercado de trabalho.",
+        "A EJ forma profissionais prontos para o mercado, combinando técnica, comportamento e prática.",
+        "A experiência na EJ ainda não prepara plenamente os membros para as exigências do mercado.",
+        "Perda de atratividade da EJ para estudantes e empresas, que buscam resultado e empregabilidade.",
+        "Posicionar a EJ como formação aplicada e medir empregabilidade fortalece recrutamento e networking.",
+        "A preparação para o mercado depende de iniciativas individuais.",
+        "Falta de conexão entre trilhas, projetos reais e feedback.",
+        "Criar uma trilha de carreira por cargo ligando competências, projetos e entregáveis, e promover uma sessão semestral de mentoria com profissionais do mercado ou alumni para cada membro.",
+        "Membros mais preparados e EJ mais atrativa para novos candidatos.",
+        "% de membros com plano de desenvolvimento individual e sessões de mentoria realizadas por semestre.",
+        "Diretoria de Pessoas", "Média", 90, 72, 45),
+    # -------------------------------------------------------------- MERCADO
+    "atrat_mercado": _i(
+        "Índice de Atratividade de Mercado", "mercado",
+        "Demanda, concorrência e facilidade de encontrar clientes no mercado de atuação.",
+        "O mercado de atuação é favorável, com demanda e valor percebido.",
+        "O mercado atual parece limitado, concorrido ou pouco consciente do valor das soluções.",
+        "Esforço comercial alto para retorno baixo e dependência de poucos clientes.",
+        "Explorar nichos e segmentos adjacentes pode ampliar o mercado endereçável.",
+        "A demanda no mercado atual é limitada ou difícil de acessar.",
+        "Foco em segmentos saturados ou pouco conscientes da necessidade, sem exploração de nichos.",
+        "Mapear 3 segmentos (setor + porte + dor) e testar cada um com 10 abordagens estruturadas em 30 dias, registrando taxa de resposta e interesse, para escolher o nicho prioritário com base em evidências.",
+        "Escolha de nicho baseada em dados e aumento da taxa de resposta.",
+        "Taxa de resposta por segmento e número de reuniões de diagnóstico geradas.",
+        "Diretoria Comercial", "Média", 60, 85, 65),
+    "comercial": _i(
+        "Índice Comercial", "mercado",
+        "Prospecção, qualificação, negociação, fechamento e acompanhamento.",
+        "Processo comercial estruturado, com prospecção e conversão acompanhadas.",
+        "Processo comercial pouco estruturado e dependente de indicações.",
+        "Receita imprevisível e dependência de poucos canais de entrada.",
+        "Estruturar um funil comercial mensurável é a alavanca mais direta de crescimento de receita.",
+        "A geração e a conversão de oportunidades dependem de iniciativas isoladas.",
+        "Ausência de funil definido, metas por etapa e registro das oportunidades.",
+        "Implantar um funil de 5 etapas (lead, reunião de diagnóstico, proposta, negociação, fechamento) registrado em uma única ferramenta, com meta semanal de abordagens e reunião semanal de pipeline, registrando o motivo de cada venda perdida.",
+        "Receita mais previsível e aprendizado sobre o que converte.",
+        "Leads por semana e taxa de conversão por etapa (meta: funil medido por 8 semanas consecutivas).",
+        "Diretoria Comercial", "Média", 30, 92, 85),
+    "pot_ticket": _i(
+        "Índice de Potencial de Ticket", "mercado",
+        "Capacidade de precificar por valor e vender projetos maiores.",
+        "Preço coerente com o valor entregue e capacidade de vender projetos maiores.",
+        "Ticket baixo ou desalinhado do valor entregue.",
+        "Margem insuficiente para sustentar qualidade e crescimento, e posicionamento de 'opção barata'.",
+        "Aumentar o ticket pode crescer o faturamento sem aumentar o volume de projetos.",
+        "O ticket não reflete o valor que a EJ entrega.",
+        "Precificação por comparação com outras EJs e pouca argumentação de valor e resultado.",
+        "Reestruturar a precificação em pacotes (essencial, avançado, recorrente) ancorados no resultado para o cliente, calculando o custo real em horas por projeto, e testar um aumento gradual nas próximas 5 propostas.",
+        "Ticket médio maior e margem por projeto mais saudável.",
+        "Ticket médio por projeto e % de propostas aceitas após o ajuste (meta: ticket em alta sem queda relevante de conversão).",
+        "Diretoria Comercial e Financeira", "Média", 60, 88, 70),
+    "posicionamento": _i(
+        "Índice de Posicionamento", "mercado",
+        "Clareza, diferenciação e adequação da oferta às necessidades do mercado.",
+        "Oferta clara e diferenciada, que o mercado entende e valoriza.",
+        "Oferta genérica, pouco diferenciada de outras EJs e alternativas.",
+        "Competição por preço e baixa lembrança de marca.",
+        "Um posicionamento nítido facilita a prospecção, justifica ticket maior e fortalece o networking.",
+        "A oferta é genérica e se confunde com a de outras EJs.",
+        "Portfólio amplo, sem foco em um problema de cliente e sem prova social.",
+        "Redefinir o portfólio em 2 a 3 ofertas focadas em problemas específicos de um segmento-alvo, cada uma com proposta de valor em uma frase, escopo padrão, case ou evidência de resultado e material de apresentação de 1 página.",
+        "Mensagem comercial mais clara, menor competição por preço e prospecção mais eficiente.",
+        "Ofertas com proposta de valor e case documentados (meta: 2 em 60 dias) e % de leads que citam a oferta específica.",
+        "Diretoria Comercial e Marketing", "Média", 60, 80, 62),
+    "networking": _i(
+        "Potencial de Networking Estratégico", "mercado",
+        "Capacidade de transformar relacionamento em oportunidades, clientes, parcerias, conhecimento e acesso ao mercado.",
+        "A rede da EJ gera resultados concretos: oportunidades, clientes, parcerias e conhecimento.",
+        "Há contatos, mas pouca conversão de relacionamento em resultado.",
+        "Dependência de prospecção fria em um mercado em que confiança e indicação pesam muito.",
+        "Ativar de forma sistemática alumni, professores, empresários e a rede de EJs pode ser o canal de menor custo para novos negócios.",
+        "O relacionamento não vira oportunidade concreta.",
+        "Rede sem mapeamento, sem responsável e sem pedidos objetivos de ajuda ou indicação.",
+        "Mapear os 40 contatos mais relevantes (alumni, professores, empresários, parceiros), designar um responsável de relacionamento para cada um e realizar um ciclo mensal de contato com um pedido objetivo (indicação, apresentação, mentoria ou parceria), registrando resultados.",
+        "Mais leads e indicações a baixo custo.",
+        "Oportunidades geradas pela rede por mês e % de contatos ativados (meta: 50% em 90 dias).",
+        "Diretoria Comercial / Presidência", "Baixa", 30, 80, 60),
+    "pot_crescimento": _i(
+        "Índice de Potencial de Crescimento Comercial", "mercado",
+        "Previsibilidade e potencial de ampliar receita a partir de mercado, funil, rede e dados.",
+        "Há clareza de onde virão novos negócios, com funil e dados que sustentam metas de crescimento.",
+        "Pouca previsibilidade sobre a origem de novos negócios.",
+        "Meta de faturamento sem plano de execução, gerando oscilações bruscas de receita.",
+        "Traduzir metas de faturamento em metas de funil dá previsibilidade e direção à diretoria.",
+        "A EJ não sabe de onde virão os próximos negócios.",
+        "Falta de metas por canal e de histórico de conversão.",
+        "Converter a meta de faturamento do semestre em metas de funil (abordagens, reuniões e propostas por semana) a partir do ticket médio e da taxa de conversão dos últimos projetos, revisando o plano todo mês.",
+        "Plano comercial rastreável e crescimento mais previsível.",
+        "% da meta de funil atingida por mês e acurácia da previsão de receita.",
+        "Diretoria Comercial e Financeira", "Média", 90, 85, 60),
+    # ------------------------------------------------------------ AUTOMAÇÃO
+    "digitalizacao": _i(
+        "Índice de Digitalização", "automacao",
+        "Cobertura e uso efetivo de ferramentas digitais nas áreas da EJ.",
+        "Ferramentas digitais cobrem as principais áreas e são realmente usadas.",
+        "Várias áreas operam com ferramentas pouco estruturadas.",
+        "Informação dispersa, retrabalho e baixa visibilidade para a diretoria.",
+        "Uma stack mínima (CRM, gestão de projetos, repositório e painel) resolve a maior parte das lacunas.",
+        "Áreas-chave operam sem ferramentas estruturadas.",
+        "Adoção de ferramentas por iniciativa individual, sem arquitetura nem padrão de uso.",
+        "Definir uma stack mínima oficial (CRM/pipeline, gestão de projetos, repositório de documentos, controle financeiro e painel de indicadores), com um responsável por ferramenta e um guia de uso de uma página para cada uma.",
+        "Informação centralizada e visibilidade gerencial.",
+        "% de áreas com ferramenta oficial em uso ativo (meta: 100%).",
+        "Diretoria de Tecnologia / Presidência", "Média", 60, 78, 62),
+    "automacao": _i(
+        "Índice de Automação", "automacao",
+        "Identificação e automação de tarefas repetitivas, coleta de dados, comunicação e relatórios.",
+        "Tarefas repetitivas são identificadas e automatizadas, liberando tempo da equipe.",
+        "Muitas tarefas repetitivas ainda são manuais.",
+        "Tempo da equipe consumido por tarefas de baixo valor e maior risco de erros.",
+        "Automatizar 3 a 5 rotinas repetitivas costuma liberar horas semanais e gerar aprendizado técnico.",
+        "Rotinas repetitivas consomem tempo e geram erros.",
+        "Ausência de mapeamento de tarefas repetitivas e de um responsável por automação.",
+        "Levantar, em uma oficina de 1 hora, todas as tarefas manuais recorrentes, estimar as horas mensais de cada uma e automatizar as 3 de maior retorno (como geração de propostas e relatórios, avisos de prazo e coleta de dados por formulário), documentando cada automação.",
+        "Horas liberadas por mês e menos erros manuais.",
+        "Horas manuais economizadas por mês (meta: 10 horas) e número de automações documentadas.",
+        "Diretoria de Tecnologia", "Média", 60, 75, 50),
+    "integracao": _i(
+        "Índice de Integração Sistêmica", "automacao",
+        "Grau em que as ferramentas se conectam e os dados fluem sem transferência manual.",
+        "Sistemas integrados, com dados fluindo entre as ferramentas.",
+        "Ferramentas isoladas, com dados espalhados e transferência manual.",
+        "Dados inconsistentes, retrabalho e impossibilidade de automações maiores e de uso consistente de IA.",
+        "Definir uma fonte única de verdade e integrar os fluxos centrais cria a base para painéis e IA.",
+        "As ferramentas não conversam entre si.",
+        "Adoção desordenada de ferramentas e ausência de desenho de arquitetura de dados.",
+        "Desenhar o mapa do fluxo de informação (do lead ao pós-projeto), definir onde cada dado nasce e é armazenado (fonte única) e integrar os 2 fluxos mais manuais com formulários, conectores nativos ou automações de baixo código.",
+        "Menos transferência manual e dados consistentes.",
+        "Fluxos integrados (meta: 2 em 90 dias) e horas semanais gastas em cópia manual de dados.",
+        "Diretoria de Tecnologia", "Alta", 90, 80, 50),
+    "cultura_dados": _i(
+        "Índice de Cultura de Dados", "automacao",
+        "Disponibilidade, qualidade e uso de dados nas decisões.",
+        "Decisões apoiadas em dados disponíveis e atualizados.",
+        "Decisões tomadas por percepção, com dados difíceis de localizar.",
+        "Decisões equivocadas, impossibilidade de avaliar resultados e perda de aprendizado.",
+        "Um painel com 8 a 10 indicadores-chave muda a qualidade das reuniões de diretoria.",
+        "A diretoria não encontra rapidamente os dados necessários para decidir.",
+        "Dados dispersos, sem definição de indicadores nem rotina de atualização.",
+        "Definir 8 a 10 indicadores-chave (faturamento, ticket médio, conversão por etapa, projetos no prazo, satisfação, retrabalho, membros ativos e horas por projeto) com dono e fonte, e montar um painel simples atualizado semanalmente e usado em toda reunião de diretoria.",
+        "Decisões mais rápidas e embasadas.",
+        "% de indicadores-chave atualizados no prazo e decisões de diretoria que citam o painel.",
+        "Diretoria de Tecnologia / Presidência", "Média", 60, 82, 68),
+    "cap_tecnologica": _i(
+        "Índice de Capacitação Tecnológica", "automacao",
+        "Conhecimento dos membros em IA, automação, dados e ferramentas digitais.",
+        "Os membros usam IA e automação com critério e identificam oportunidades de ganho.",
+        "A capacitação em IA, dados e automação é incipiente e informal.",
+        "Defasagem competitiva diante de quem já usa IA para entregar mais rápido e com mais qualidade.",
+        "Uma oficina prática de IA aplicada aos processos da EJ gera ganhos imediatos de produtividade e diferencial nas entregas.",
+        "O uso de IA e automação é individual e sem critério.",
+        "Ausência de capacitação, de diretrizes de uso e de casos de aplicação.",
+        "Realizar um programa de 4 encontros práticos de IA aplicada (prompts, automação e análise de dados), construir 1 caso de uso por área e publicar um guia de uso responsável de IA (dados de clientes, validação de resultados e confidencialidade).",
+        "Equipe mais produtiva, com uso padronizado e seguro de IA.",
+        "% de membros capacitados e casos de uso de IA em produção (meta: 1 por área).",
+        "Diretoria de Tecnologia e Pessoas", "Baixa", 30, 76, 62),
+    # ---------------------------------------------------------- TRANSVERSAIS
+    "escalabilidade": _i(
+        "Índice de Escalabilidade", "transversal",
+        "Quanto a EJ consegue crescer sem aumentar proporcionalmente o caos operacional.",
+        "A estrutura suporta crescimento sem comprometer a qualidade.",
+        "O crescimento de volume tende a degradar prazo e qualidade.",
+        "Crescimento comercial gerando atrasos, insatisfação de clientes e sobrecarga da equipe.",
+        "Preparar a capacidade antes de acelerar a venda evita o ciclo de vender mais e entregar pior.",
+        "A estrutura atual não sustenta um aumento relevante de projetos.",
+        "Capacidade não medida, processos manuais e dependência de poucos membros.",
+        "Definir o limite de projetos simultâneos por equipe com base na capacidade medida, criar um gatilho de capacidade (só aceitar novos projetos com folga confirmada) e padronizar modelos de proposta, cronograma e relatório para reduzir o esforço de cada novo projeto.",
+        "Crescimento sustentável sem queda de qualidade.",
+        "Projetos simultâneos por membro e % de projetos entregues no prazo em períodos de pico.",
+        "Presidência / Diretoria de Projetos", "Média", 60, 90, 72),
+    "resiliencia": _i(
+        "Índice de Resiliência", "transversal",
+        "Capacidade de manter a operação diante da saída de pessoas-chave e da troca de gestão.",
+        "A organização mantém o funcionamento diante de mudanças de equipe.",
+        "A continuidade da operação depende da permanência de pessoas específicas.",
+        "Paralisação de projetos e perda de memória organizacional na troca de gestão.",
+        "Tornar a transição de gestão um processo formal protege o legado e acelera a nova gestão.",
+        "A operação é vulnerável a saídas de pessoas e a trocas de gestão.",
+        "Conhecimento tácito, ausência de suplentes e de processo formal de transição.",
+        "Elaborar um plano de continuidade: lista de funções críticas com titular e suplente, manual de transição por cargo e uma simulação semestral de saída de pessoa-chave para testar se a operação continua.",
+        "Operação protegida contra rotatividade.",
+        "Tempo de recuperação da operação na simulação e % de cargos com manual de transição (meta: 100%).",
+        "Presidência", "Média", 90, 85, 60),
+    "conv_valor": _i(
+        "Índice de Conversão de Conhecimento em Valor", "transversal",
+        "Quanto a formação dos membros se transforma em soluções entregues a clientes.",
+        "O que se aprende na EJ rapidamente vira solução para clientes.",
+        "O conhecimento adquirido em treinamentos nem sempre vira capacidade de entrega.",
+        "Investimento em capacitação com baixo retorno e membros que não resolvem problemas reais.",
+        "Ligar cada capacitação a um projeto aumenta o retorno do tempo investido.",
+        "Treinamentos não se convertem em entregas.",
+        "Capacitações desconectadas das necessidades dos projetos e sem acompanhamento da aplicação.",
+        "Condicionar toda capacitação a uma aplicação em projeto em até 30 dias, com um entregável de aplicação (modelo, análise, protótipo ou proposta) revisado por um mentor e arquivado como ativo reutilizável.",
+        "Mais entregas de valor a partir do investimento em formação e acervo de ativos reaproveitáveis.",
+        "Entregáveis de aplicação por capacitação (meta: pelo menos 1).",
+        "Diretoria de Pessoas e Projetos", "Baixa", 30, 80, 65),
+    "prontidao_ia": _i(
+        "Índice de Prontidão para IA", "transversal",
+        "Processos, dados, cultura e pessoas preparados para usar IA com valor.",
+        "A EJ tem processos, dados e pessoas que permitem usar IA com ganho real.",
+        "A base de processos, dados e cultura ainda limita ganhos consistentes com IA.",
+        "Uso superficial ou arriscado de IA (dados de clientes, qualidade), sem ganho real de produtividade.",
+        "Processos padronizados e dados organizados fazem a IA gerar ganhos reais e rápidos.",
+        "A EJ ainda não tem a base necessária para usar IA com valor.",
+        "Processos informais, dados dispersos e uso individual sem diretrizes.",
+        "Escolher 2 processos já padronizados (como elaboração de propostas e de relatórios de projeto), estruturar seus insumos (modelos e bases de exemplos) e pilotar assistentes de IA com checagem humana, medindo tempo economizado e qualidade antes de ampliar para outras áreas.",
+        "Ganhos de produtividade com risco controlado.",
+        "Tempo médio por tarefa antes e depois da IA e % de saídas aprovadas sem retrabalho.",
+        "Diretoria de Tecnologia", "Média", 90, 80, 55),
+    "profissionalizacao": _i(
+        "Índice de Profissionalização", "transversal",
+        "Uso de práticas de gestão estruturadas: processos, indicadores, rituais, planejamento e governança.",
+        "A EJ opera com práticas de gestão profissionais, que sustentam credibilidade com clientes e parceiros.",
+        "A gestão ainda é mais intuitiva do que sistemática.",
+        "A EJ é percebida como amadora por clientes e parceiros e tem dificuldade de crescer e reter conhecimento.",
+        "Práticas simples de governança (planejamento, indicadores e rituais) elevam a credibilidade e a eficiência.",
+        "A gestão depende de improviso e de pessoas mais do que de práticas estruturadas.",
+        "Falta de rituais de planejamento e de indicadores de gestão.",
+        "Instituir o ciclo de gestão trimestral: planejamento com metas (OKRs ou metas SMART), reunião mensal de resultados com o painel de indicadores e retrospectiva ao fim de cada ciclo, com atas curtas registradas no repositório.",
+        "Gestão previsível, com metas claras e aprendizado contínuo.",
+        "% de metas trimestrais atingidas e aderência aos rituais de gestão (meta: 100% realizados).",
+        "Presidência", "Baixa", 30, 85, 75),
+}
+
+# ----------------------------------------------------------------------------
+# Regras de análise cruzada (gargalos). Cada regra recebe um contexto com:
+#   i = notas dos indicadores, d = notas das dimensões, q = notas das perguntas.
+# Textos podem usar {maior} e {menor} (dimensões mais e menos maduras).
+# ----------------------------------------------------------------------------
+REGRAS_GARGALO = [
+    {
+        "id": "desequilibrio", "severidade": "média",
+        "titulo": "Desequilíbrio estrutural entre dimensões",
+        "cond": lambda i, d, q: (max(d.values()) - min(d.values())) >= 25,
+        "leitura": "A diferença entre a dimensão mais madura ({maior}) e a menos madura ({menor}) é grande. A EJ cresce de forma assimétrica: o ponto forte não consegue ser plenamente aproveitado porque o ponto fraco limita o resultado final.",
+        "consequencia": "Esforço concentrado em uma frente é parcialmente desperdiçado pelo gargalo na outra.",
+        "foco": ["profissionalizacao"],
+    },
+    {
+        "id": "tecnica_sem_venda", "severidade": "alta",
+        "titulo": "Boa capacidade técnica, baixa capacidade comercial",
+        "cond": lambda i, d, q: i["desenv_tecnico"] >= 60 and i["comercial"] < 45,
+        "leitura": "A EJ sabe entregar, mas não consegue transformar essa competência em vendas. O valor técnico está sendo subutilizado e a capacidade de entrega fica ociosa.",
+        "consequencia": "Capacidade ociosa, receita abaixo do potencial e frustração dos membros por falta de projetos reais.",
+        "foco": ["comercial", "posicionamento"],
+    },
+    {
+        "id": "mercado_sem_prospeccao", "severidade": "alta",
+        "titulo": "Mercado interessante, baixa capacidade de prospecção",
+        "cond": lambda i, d, q: i["atrat_mercado"] >= 60 and q["M04"] < 45,
+        "leitura": "O mercado parece oferecer demanda, porém a EJ não tem método para gerar e abordar oportunidades. A demanda existe, mas a EJ não a captura.",
+        "consequencia": "Oportunidades de mercado capturadas por concorrentes e dependência de indicações ocasionais.",
+        "foco": ["comercial", "pot_crescimento"],
+    },
+    {
+        "id": "venda_sem_operacao", "severidade": "alta",
+        "titulo": "Boa venda, operação frágil",
+        "cond": lambda i, d, q: i["comercial"] >= 60 and (i["saude_operacional"] < 45 or i["escalabilidade"] < 45),
+        "leitura": "A EJ vende bem, mas a operação não tem folga nem estrutura para sustentar o volume. Vender mais, sem corrigir a operação, tende a piorar prazos e satisfação.",
+        "consequencia": "Crescimento comercial convertido em atrasos, retrabalho e desgaste de clientes e membros.",
+        "foco": ["saude_operacional", "escalabilidade"],
+    },
+    {
+        "id": "conhecimento_sem_aplicacao", "severidade": "média",
+        "titulo": "Membros capacitados, baixa aplicação prática",
+        "cond": lambda i, d, q: i["desenv_tecnico"] >= 60 and (i["aplicabilidade"] < 45 or i["conv_valor"] < 45),
+        "leitura": "Os membros adquirem conhecimento, mas encontram poucas oportunidades de transformá-lo em solução real para clientes. A formação não se converte em capacidade de gerar valor.",
+        "consequencia": "Baixo retorno do investimento em capacitação e formação pouco alinhada às exigências do mercado.",
+        "foco": ["aplicabilidade", "conv_valor"],
+    },
+    {
+        "id": "processo_sem_automacao", "severidade": "média",
+        "titulo": "Processos estruturados, baixa automação",
+        "cond": lambda i, d, q: d["processos"] >= 60 and d["automacao"] < 45,
+        "leitura": "Os processos já têm estrutura suficiente para serem automatizados, mas a EJ ainda executa manualmente. Há um ganho de produtividade disponível e pouco explorado.",
+        "consequencia": "Tempo da equipe gasto em tarefas repetitivas e competitividade menor diante de organizações que usam IA e automação.",
+        "foco": ["automacao", "integracao"],
+    },
+    {
+        "id": "automacao_sem_processo", "severidade": "média",
+        "titulo": "Automação apoiada em processos desorganizados",
+        "cond": lambda i, d, q: i["automacao"] >= 55 and i["padronizacao"] < 40,
+        "leitura": "Há automação sobre processos pouco padronizados: o risco é automatizar o caos, consolidando erros e variações em vez de eliminá-los.",
+        "consequencia": "Automações frágeis, difíceis de manter e dependentes de quem as criou.",
+        "foco": ["padronizacao"],
+    },
+    {
+        "id": "networking_sem_conversao", "severidade": "média",
+        "titulo": "Networking forte, baixa conversão comercial",
+        "cond": lambda i, d, q: i["networking"] >= 60 and i["comercial"] < 45,
+        "leitura": "A EJ tem uma rede valiosa, mas não a transforma em pipeline. Os relacionamentos geram acesso, porém sem processo comercial que converta o acesso em venda.",
+        "consequencia": "Ativo estratégico (a rede) subutilizado e receita aquém do que as relações permitiriam.",
+        "foco": ["comercial", "pot_crescimento"],
+    },
+    {
+        "id": "risco_troca_gestao", "severidade": "alta",
+        "titulo": "Risco de perda de conhecimento na troca de gestão",
+        "cond": lambda i, d, q: i["dep_pessoas"] < 45 and i["gestao_conhecimento"] < 45,
+        "leitura": "O conhecimento está concentrado em poucas pessoas e pouco registrado. A combinação de dependência de pessoas com baixa gestão do conhecimento torna cada troca de gestão um momento de reinício.",
+        "consequencia": "Perda de memória organizacional, repetição de erros e queda de desempenho a cada transição.",
+        "foco": ["gestao_conhecimento", "dep_pessoas", "resiliencia"],
+    },
+    {
+        "id": "ticket_posicionamento", "severidade": "média",
+        "titulo": "Ticket incompatível com o posicionamento",
+        "cond": lambda i, d, q: i["posicionamento"] >= 60 and i["pot_ticket"] < 45,
+        "leitura": "A oferta é clara e valorizada, mas a precificação não acompanha. A EJ provavelmente cobra menos do que o valor que entrega e permite.",
+        "consequencia": "Margem insuficiente, esforço excessivo por real faturado e dificuldade de reinvestir na estrutura.",
+        "foco": ["pot_ticket"],
+    },
+    {
+        "id": "decisao_sem_dados", "severidade": "média",
+        "titulo": "Decisões sem base em dados",
+        "cond": lambda i, d, q: i["cultura_dados"] < 40,
+        "leitura": "A diretoria tem dificuldade em acessar dados confiáveis para decidir. As decisões dependem de percepção e de memória individual.",
+        "consequencia": "Decisões lentas ou equivocadas e dificuldade de aprender com resultados passados.",
+        "foco": ["cultura_dados", "integracao"],
+    },
+    {
+        "id": "ferramentas_isoladas", "severidade": "média",
+        "titulo": "Ferramentas digitais isoladas, sem integração",
+        "cond": lambda i, d, q: i["digitalizacao"] >= 55 and i["integracao"] < 40,
+        "leitura": "Há ferramentas digitais, porém sem arquitetura: a informação precisa ser transferida manualmente e cada área opera em silos.",
+        "consequencia": "Retrabalho, dados inconsistentes e impossibilidade de automações mais ambiciosas.",
+        "foco": ["integracao", "automacao"],
+    },
+    {
+        "id": "crescimento_sem_base", "severidade": "alta",
+        "titulo": "Plano de crescimento sem base operacional",
+        "cond": lambda i, d, q: i["pot_crescimento"] >= 60 and i["escalabilidade"] < 45,
+        "leitura": "A EJ vê caminhos para crescer comercialmente, mas a estrutura atual não suportaria o aumento de volume sem perda de qualidade.",
+        "consequencia": "Crescimento que compromete reputação e saúde da equipe.",
+        "foco": ["escalabilidade", "saude_operacional"],
+    },
+    {
+        "id": "ia_sem_base", "severidade": "média",
+        "titulo": "Uso de IA sem base de processos e dados",
+        "cond": lambda i, d, q: i["prontidao_ia"] < 40 and i["cap_tecnologica"] >= 55,
+        "leitura": "Os membros têm interesse e familiaridade com IA, mas processos e dados não estão preparados. O uso tende a ficar individual e pontual, sem ganho organizacional.",
+        "consequencia": "Ganhos de produtividade restritos a indivíduos e riscos de uso inadequado de dados de clientes.",
+        "foco": ["prontidao_ia", "padronizacao"],
+    },
+    {
+        "id": "mercado_sem_diferencial", "severidade": "alta",
+        "titulo": "Mercado pouco atrativo e oferta pouco diferenciada",
+        "cond": lambda i, d, q: i["atrat_mercado"] < 40 and i["posicionamento"] < 40,
+        "leitura": "A EJ enfrenta um mercado difícil e sem diferenciais claros, o que empurra a negociação para preço. Sem mudança de foco ou de nicho, o esforço comercial tende a render pouco.",
+        "consequencia": "Competição por preço, ticket baixo e esforço comercial com baixo retorno.",
+        "foco": ["posicionamento", "atrat_mercado"],
+    },
+    {
+        "id": "sobrecarga_dependencia", "severidade": "alta",
+        "titulo": "Sobrecarga operacional concentrada em poucas pessoas",
+        "cond": lambda i, d, q: i["saude_operacional"] < 40 and i["dep_pessoas"] < 40,
+        "leitura": "A operação sofre com atrasos e retrabalho e, ao mesmo tempo, depende de poucas pessoas. Isso cria um ciclo em que quem sabe mais é o mais sobrecarregado.",
+        "consequencia": "Risco de esgotamento das pessoas-chave e de paralisação da operação.",
+        "foco": ["saude_operacional", "dep_pessoas"],
+    },
+    {
+        "id": "baixa_conexao_mercado", "severidade": "média",
+        "titulo": "Baixa conexão com o mercado",
+        "cond": lambda i, d, q: i["networking"] < 40 and i["prep_mercado"] < 50,
+        "leitura": "A EJ tem pouca conexão com o ecossistema e seus membros têm pouca exposição a profissionais e problemas do mercado. A universidade e o mercado seguem pouco conectados.",
+        "consequencia": "Menor acesso a oportunidades, referências e feedback realista sobre o mercado.",
+        "foco": ["networking", "prep_mercado"],
+    },
+]
+
+# ----------------------------------------------------------------------------
+# Cenários da análise "E se?": lista de (indicador, nível_base, sensibilidade).
+# Nível exigido = base + sensibilidade * variação (%). É uma simulação conceitual.
+# ----------------------------------------------------------------------------
+CENARIOS = {
+    "volume": {
+        "titulo": "Aumento no volume de projetos",
+        "pergunta": "Se o volume de projetos aumentasse em {pct}%, quais pontos da estrutura se tornariam gargalo?",
+        "rotulo_slider": "Aumento no volume de projetos (%)",
+        "faixa": (10, 100, 30),
+        "exigencias": [
+            ("saude_operacional", 45, 0.60), ("escalabilidade", 40, 0.70),
+            ("gestao_projetos", 40, 0.50), ("padronizacao", 35, 0.50),
+            ("dep_pessoas", 35, 0.40), ("gestao_conhecimento", 35, 0.40),
+            ("automacao", 25, 0.50), ("desenv_tecnico", 40, 0.30),
+        ],
+    },
+    "comercial": {
+        "titulo": "Aumento da capacidade comercial",
+        "pergunta": "Se a EJ aumentar sua capacidade comercial em {pct}%, a estrutura operacional atual suportaria esse crescimento?",
+        "rotulo_slider": "Aumento da capacidade comercial (%)",
+        "faixa": (10, 100, 20),
+        "exigencias": [
+            ("saude_operacional", 45, 0.60), ("escalabilidade", 40, 0.70),
+            ("gestao_projetos", 40, 0.50), ("padronizacao", 35, 0.50),
+            ("org_operacional", 40, 0.40), ("automacao", 25, 0.40),
+            ("dep_pessoas", 35, 0.30), ("pot_ticket", 30, 0.20),
+        ],
+    },
+    "saida": {
+        "titulo": "Saída de membros-chave / troca de gestão",
+        "pergunta": "Se {pct}% dos membros que concentram conhecimento saíssem, a operação se manteria?",
+        "rotulo_slider": "Parcela de membros-chave que saem (%)",
+        "faixa": (10, 80, 30),
+        "exigencias": [
+            ("dep_pessoas", 30, 0.80), ("gestao_conhecimento", 30, 0.70),
+            ("resiliencia", 30, 0.70), ("padronizacao", 30, 0.50),
+            ("org_operacional", 30, 0.40),
+        ],
+    },
+}
